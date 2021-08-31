@@ -31,7 +31,6 @@ class User {
     const currentUser = result.rows[0];
 
     if (currentUser && await bcrypt.compare(password, currentUser.password)) {
-
       return true;
     }
     else {
@@ -72,7 +71,7 @@ class User {
       [username]);
     const currentUser = results.rows[0];
     if (!currentUser) {
-      throw new ExpressError("User not found", 404)
+      throw new ExpressError(`${username} not found`, 404)
     }
     return currentUser;
   }
