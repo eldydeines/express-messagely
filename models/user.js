@@ -1,6 +1,10 @@
 /** User class for message.ly */
+/** Message class for message.ly */
 
-
+const db = require("../db");
+const ExpressError = require("../expressError");
+const bcrypt = require("bcrypt");
+const { BCRYPT_WORK_FACTOR, SECRET_KEY } = require("../config");
 
 /** User of the site. */
 
@@ -8,11 +12,12 @@ class User {
 
   /** register new user -- returns {username, password, first_name, last_name, phone} */
   static async register({ username, password, first_name, last_name, phone }) {
+    const hashedPassword = await bcrypt.hash(password, BCRYPT_WORK_FACTOR);
     const result = await db.query(
-      `INSERT INTO users (username, password, first_name, last_name, phone)
-       VALUES($1, $2, $3, $4, $5)
+      `INSERT INTO users (username, password, first_name, last_name, phone, join_at, last_login_at)
+       VALUES($1, $2, $3, $4, $5, current_timestamp, current_timestamp)
        RETURNING username, password, first_name, last_name, phone`,
-      [username, password, first_name, last_name, phone]);
+      [username, hashedPassword, first_name, last_name, phone]);
     return result.rows[0];
   }
 
@@ -23,34 +28,32 @@ class User {
        FROM users
        WHERE username = $1`,
       [username]);
-    const currentUser = results.rows[0];
+    const currentUser = result.rows[0];
 
-    if (currentUser) {
-      if (await bcrypt.compare(password, CurrentUser.password)) {
-        return true;
-      }
-      else
-        return false;
+    if (currentUser && await bcrypt.compare(password, currentUser.password)) {
+
+      return true;
+    }
+    else {
+      return false;
     }
 
   }
 
   /** Update last_login_at for user */
   static async updateLoginTimestamp(username) {
-    let last_login = new Date();
     await db.query(
       `UPDATE users
-      SET last_login_at = $1
-      WHERE username = $2`,
-      [last_login, username]);
+      SET last_login_at = current_timestamp
+      WHERE username = $1`,
+      [username]);
   }
 
   /** All: basic info on all users:
    * [{username, first_name, last_name, phone}, ...] */
   static async all() {
     const results = await db.query(`SELECT username, first_name, last_name, phone FROM users`);
-    const allUsers = results.rows.map(r => new User(r.username, r.first_name, r.last_name, r.phone));
-    return allUsers;
+    return results.rows;
   }
 
   /** Get: get user by username
@@ -84,16 +87,15 @@ class User {
    */
   static async messagesFrom(username) {
     const results = await db.query(
-      `SELECT m.id, m.body, m.sent_at, m.read_at, u.username, u.first_name, u.last_name, u.phone 
+      `SELECT m.id, m.body, m.sent_at, m.read_at, m.to_username, u.first_name, u.last_name, u.phone 
        FROM messages AS m
-       INNER JOIN users AS u ON (m.to_user = u.username)
+       INNER JOIN users AS u ON (m.to_username = u.username)
        WHERE from_username = $1`,
       [username]);
     if (results.rows.length === 0) {
       throw new ExpressError("No messages not found", 404);
     }
-    const toUsers = results.rows.map(r =>
-      new User(r.id, r.body, r.sent_at, r.read_at, r.username, r.first_name, r.last_name, r.phone));
+    const toUsers = results.rows.map(r => ({ id: r.id, body: r.body, sent_at: r.sent_at, read_at: r.read_at, to_user: { username: r.to_username, first_name: r.first_name, last_name: r.last_name, phone: r.phone } }));
     return toUsers;
   }
 
@@ -106,16 +108,15 @@ class User {
    */
   static async messagesTo(username) {
     const results = await db.query(
-      `SELECT m.id, m.body, m.sent_at, m.read_at, u.username, u.first_name, u.last_name, u.phone 
+      `SELECT m.id, m.body, m.sent_at, m.read_at, m.from_username, u.first_name, u.last_name, u.phone 
        FROM messages AS m
-       INNER JOIN users AS u ON (m.from_user = u.username)
+       INNER JOIN users AS u ON (m.from_username = u.username)
        WHERE to_username = $1`,
       [username]);
     if (results.rows.length === 0) {
       throw new ExpressError("No messages not found", 404);
     }
-    const fromUsers = results.rows.map(r =>
-      new User(r.id, r.body, r.sent_at, r.read_at, r.username, r.first_name, r.last_name, r.phone));
+    const fromUsers = results.rows.map(r => ({ id: r.id, body: r.body, sent_at: r.sent_at, read_at: r.read_at, from_user: { username: r.from_username, first_name: r.first_name, last_name: r.last_name, phone: r.phone } }));
     return fromUsers;
   }
 
